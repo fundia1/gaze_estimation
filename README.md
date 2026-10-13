@@ -1,4 +1,10 @@
+# **데이터 분석 ➔ [EDA.ipynb](EDA.ipynb)**
+# **학습 및 결과 ➔ [main.ipynb](main.ipynb)**
+
+---
+
 ## 데이터 폴더 구조
+
 
 `python -m preprocess.mpii`를 실행하면 `data/` 아래에 다음이 생긴다. `data/`는 `.gitignore`에 들어 있어 저장소에 올라가지 않는다. 변환 과정은 [preprocess/README.md](preprocess/README.md)에 정리되어 있다.
 
