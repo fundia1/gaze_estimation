@@ -1,4 +1,4 @@
-"""NumPy-only CNN gaze estimator with a baseline-initialized linear skip branch."""
+"""NumPy/CuPy 기반 Ridge 잔차 보정 CNN 시선 추정 모델."""
 
 import argparse
 import os
@@ -30,7 +30,7 @@ from baseline_linear import PERSONS, Stats, angular_error, fit_ridge, load_perso
 
 
 class LeakyRelu:
-    """Leaky ReLU keeps a small gradient for negative feature values."""
+    """음수 영역에서도 작은 gradient를 유지하는 Leaky ReLU."""
 
     def __init__(self, alpha=0.01):
         self.alpha = alpha
@@ -49,7 +49,7 @@ class LeakyRelu:
 
 
 def set_backend(device):
-    """Switch the scratch layers to CuPy when GPU execution is requested."""
+    """GPU를 선택하면 common 레이어가 CuPy를 사용하도록 전환한다."""
     gpu_ready = False
     if CUPY_AVAILABLE:
         try:
@@ -73,7 +73,7 @@ def set_backend(device):
 
 
 class GazeCNN:
-    """Frozen baseline plus a small, regularized CNN residual."""
+    """고정된 Ridge 예측에 CNN 잔차를 더하는 모델."""
 
     def __init__(
         self,
@@ -87,7 +87,6 @@ class GazeCNN:
         self.xp = xp
         self.residual_scale = residual_scale
         self.residual_l2 = residual_l2
-        # No fixed seed: every execution gets a fresh initialization.
         rng = xp.random.RandomState()
         randn = rng.randn
         Affine, Convolution, Pooling = (
@@ -110,12 +109,10 @@ class GazeCNN:
             pad=1,
         )
         self.relu2 = LeakyRelu(alpha=0.01)
-        # Do not initialize this to zero: otherwise no gradient reaches the
-        # convolution layers through the affine layer.
         self.fc = Affine(
             xp.zeros((8642, 2), dtype=xp.float32), xp.zeros(2, dtype=xp.float32)
         )
-        # Keep the already strong Ridge baseline fixed. Only the residual CNN learns.
+        # Ridge branch는 고정하고 CNN 잔차 branch만 학습한다.
         self.params = {
             "conv_W": self.conv.W,
             "conv_b": self.conv.b,
@@ -204,7 +201,6 @@ class GazeCNN:
 
 
 def predict_in_batches(model, X, batch_size, xp):
-    """Run inference in small batches to avoid allocating a huge im2col buffer."""
     predictions = []
     for start in range(0, len(X), batch_size):
         batch = X[start : start + batch_size]
@@ -218,7 +214,6 @@ def predict_in_batches(model, X, batch_size, xp):
 
 def run_fold(root, test_person, epochs, batch_size, lr, xp):
     train_people = [p for p in PERSONS if p != test_person]
-    # baseline_linear.load_person uses ThreadPoolExecutor and requires workers > 0.
     train_sets = [
         load_person(root, p, use_head=True, num_workers=8) for p in train_people
     ]
@@ -226,13 +221,9 @@ def run_fold(root, test_person, epochs, batch_size, lr, xp):
     X = np.concatenate([item[0] for item in train_sets])
     y = np.concatenate([item[1] for item in train_sets])
     W, b = fit_ridge(Stats(X, y), alpha=1000.0)
-    # Initialize the output bias with the training-set mean residual.
-    # This is more suitable for gaze regression than a zero output bias.
-    residual_bias = ((y - (X @ W + b)).mean(axis=0) / 0.05).astype(np.float32)
-    model = GazeCNN(W, b, xp=xp, residual_bias=residual_bias)
+    model = GazeCNN(W, b, xp=xp)
     optimizer = common_optimizer.Adam(lr=lr)
     rng = np.random.default_rng()
-    # Report the true frozen Ridge baseline, excluding the randomly initialized residual.
     baseline_pred = test_X @ W + b
     initial_pred = baseline_pred
     initial_error = float(angular_error(initial_pred, test_y).mean())
@@ -276,7 +267,6 @@ def main():
         )
         models[person] = model.state_dict()
         print(f"  test {person}: {errors[person]:.2f} degrees")
-        # Save each fold separately: *_01.pkl, *_02.pkl, ...
         output_root, output_ext = os.path.splitext(args.output)
         fold_output = f"{output_root}_{i + 1:02d}{output_ext or '.pkl'}"
         with open(fold_output, "wb") as handle:
