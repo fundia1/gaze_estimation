@@ -1,5 +1,5 @@
 # **데이터 분석 ➔ [EDA.ipynb](EDA.ipynb)**
-# **학습 및 결과 ➔ [main.ipynb](main.ipynb)**
+# **학습 및 결과 ➔ [main.py](main.py)**
 
 ---
 
